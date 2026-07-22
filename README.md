@@ -225,11 +225,9 @@ For `target.mode: label` (a churn flag with no date), the kit runs a single
 cross-section and reports that it cannot verify any feature was knowable before the
 customer left. Prefer `event_date` whenever you have a date.
 
-## Worked example: the Postcode Lottery case study
+## Worked example: case study
 
-`config_plg/` is a complete, runnable config for the take-home in
-`case_study_plg_description.MD`, plus an ingest adapter for its deliberately messy
-CRM export.
+`config_plg/` is a complete, runnable config for a specific churn analysis problem.
 
 ```bash
 python tools/ingest_plg.py --raw data/raw/advanced_case_study_data.csv
