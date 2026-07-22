@@ -1,0 +1,22 @@
+data_export_date: 2025-06-30
+observation_starting_date: 2022-01-01 #this means all the churns before are not existing in our data.
+
+# OPTIONAL, and a different question: when does your EVENT HISTORY become complete?
+# observation_starting_date is about churn observation; this is about how far back a
+# feature window may reach. They are often not the same date — an export can carry
+# three years of usage logs for a cohort whose churn is only observed from last
+# July. Blank means "same as observation_starting_date".
+#
+# Set it if a long window (say 1095 days) makes the kit reject every prediction date.
+event_history_starts:
+
+# What to do with customers who started BEFORE observation_starting_date.
+# Those customers are only in your data because they survived long enough to be
+# exported — their peers who churned earlier were never recorded. Including them
+# makes tenure look protective and biases every driver that correlates with age.
+#
+#   drop         -> exclude them from the modelling panel (safe default)
+#   keep_flagged -> keep them, add a `left_truncated` flag, and use left-truncated
+#                   survival estimates (Cox with an entry time). Classification
+#                   metrics remain biased; the report says so.
+left_truncation: drop

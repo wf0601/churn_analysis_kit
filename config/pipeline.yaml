@@ -1,0 +1,92 @@
+# config/pipeline.yaml — how the analysis is run.
+# Every value here has a working default; you can delete keys you don't care about.
+
+run:
+  output_dir: output
+  random_seed: 42
+
+panel:
+  # A "snapshot" is a prediction date T. Features are built from data strictly
+  # BEFORE T - embargo_days; the label is whether the customer churned in
+  # (T, T + horizon_days]. Nothing else is allowed to cross that line.
+  snapshot_mode: rolling        # rolling | single
+  snapshot_frequency: MS        # pandas offset alias (MS = month start, W = weekly)
+  snapshot_start:               # blank -> observation_starting_date + longest window
+  snapshot_end:                 # blank -> observation_end_date - horizon_days
+  snapshot_dates: []            # used only when snapshot_mode = single
+
+  horizon_days: 90              # prediction horizon for the churn label
+
+  # THE most important leakage control in this file.
+  # Churn is usually *decided* before it is *recorded*. Payment failures, angry
+  # tickets and usage collapse in the final days are consequences of a decision
+  # already made, not causes you can act on. embargo_days blanks out that window
+  # so the model has to predict from genuinely upstream signal.
+  embargo_days: 7
+
+  min_tenure_days: 0            # exclude customers younger than this at T
+  max_snapshots_per_entity:     # blank = keep all; set to 1 to de-correlate rows
+
+split:
+  strategy: out_of_time         # out_of_time | grouped_random
+  test_fraction: 0.25           # fraction of snapshot dates held out (the latest ones)
+  cv_folds: 4                   # inner CV, grouped by customer so no customer spans folds
+  purge_days: 0                 # extra gap between last train snapshot and first test snapshot
+
+model:
+  primary: hist_gradient_boosting
+  calibrate: true               # isotonic calibration on a held-out inner split
+  class_weight: balanced
+  max_iter: 300
+  learning_rate: 0.06
+  max_leaf_nodes: 31
+
+drivers:
+  top_k: 20
+  method: auto                  # auto | shap | permutation
+  n_permutation_repeats: 10
+  min_stability: 0.5            # a driver must rank top-k in >= this share of folds
+
+leakage:
+  # quarantine = drop the offending feature, keep running, shout about it in the report
+  # fail       = abort the run on any BLOCK-level finding
+  on_block: quarantine
+
+  # Columns matching these patterns are never allowed to become features.
+  # They are the outcome, or a direct clerical artifact of the outcome.
+  denylist_patterns:
+    - churn
+    - cancel
+    - terminat
+    - "(^|_)end_date$"
+    - expir
+    - "(^|_)exit"
+    - reason
+    - refund
+    - "final_"
+    - closed
+    - win_?back
+    - retention_offer
+    - save_?desk
+    - survival
+    - is_active
+    - status
+
+  # Escape hatch: exact column names that survive the denylist. Use sparingly and
+  # only when you can explain why the column is knowable at T.
+  allowlist_columns: []
+
+  single_feature_auc_block: 0.90   # one feature alone separates churners this well -> leak
+  single_feature_auc_warn: 0.80
+  missingness_auc_warn: 0.75       # "is this field null" predicts churn -> process leak
+  model_auc_block: 0.995           # too good to be true
+  id_cardinality_ratio_warn: 0.9   # near-unique feature = identifier, not signal
+
+survival:
+  enabled: true
+  cox: true
+  by:                           # blank -> uses data.yaml segments
+  max_strata: 8
+
+causal:
+  enabled: true

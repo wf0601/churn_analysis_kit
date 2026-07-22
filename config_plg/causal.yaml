@@ -1,0 +1,69 @@
+# Observational causal estimates, for the levers that were NOT randomised.
+#
+# The experiment already answers "does Variant A/B work" properly. This stage
+# answers a different and complementary question: of the churn drivers the model
+# surfaces, which ones look like they would actually move churn if you changed
+# them — and which are just markers.
+#
+# For a retention marketeer this is the difference between "cancellation enquiries
+# predict churn, so call those people" (true but circular) and "resolving a billing
+# issue causes X pp less churn, so staff the billing queue" (actionable).
+
+treatments:
+  - name: had_cancellation_inquiry
+    feature: contacts__cancellation__event_count_365d
+    type: threshold
+    threshold: 0
+    direction: greater
+
+  - name: had_failed_payment
+    feature: payments__failed_payments_12m
+    type: threshold
+    threshold: 0
+    direction: greater
+
+  - name: made_a_complaint
+    feature: service__complaints_12m
+    type: threshold
+    threshold: 0
+    direction: greater
+
+  - name: opted_into_extra_draws
+    feature: subscription__extra_draws_per_year
+    type: threshold
+    threshold: 0
+    direction: greater
+
+confounders:
+  mode: auto
+  # Entries accept globs. Run the pipeline once and read
+  # output_plg/feature_dictionary.csv for the exact names.
+  exclude:
+    # Mediators. Contact volume sits on the path between having a problem and
+    # leaving; controlling for it subtracts part of the effect being measured.
+    - contacts__contact__*
+    # Post-outcome by construction — belt and braces, they should not be features.
+    - "*revenue_next*"
+    - "*offer_cost*"
+  explicit: []
+
+estimator:
+  method: aipw
+  cross_fit_folds: 5
+  propensity_clip: 0.02
+  min_overlap_share: 0.90
+  bootstrap: 0
+
+refutations:
+  placebo_treatment: true
+  random_subset: true
+  subset_fraction: 0.7
+
+# NOTE ON THE OPTIONAL HETEROGENEITY TASK (Part C.2)
+#
+# This file estimates average effects, not conditional ones. It will not tell you
+# which segments respond better to Variant A than Variant B — that needs a CATE /
+# uplift model, which this kit does not have. See the fit notes: the honest options
+# are a two-model (T-learner) uplift estimate or a causal forest on the randomised
+# arms, with pre-registered segments and multiple-testing control. Subgroup effects
+# found by searching are the single easiest way to ship a false finding.

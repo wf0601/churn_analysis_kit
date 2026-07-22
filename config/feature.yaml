@@ -1,0 +1,149 @@
+# config/feature.yaml — ALL feature construction, in one file. No Python required.
+#
+# ── Group keys ──────────────────────────────────────────────────────────────
+#   temporal: static | time_varying | derived
+#   source:   entity | <key under `events` in data.yaml>
+#             (default: entity for static, the group's own name for time_varying)
+#
+#   time_varying groups build features by aggregating an event log inside a window:
+#     windows: [30, 90]        one or more lookback windows, in days
+#                              (`aggregation_window_days: 90` still works)
+#     aggs:    [sum, mean]     group default; available: sum, mean, max, min, last,
+#                              first, count, median, std, nunique
+#     filters: named row subsets — see below
+#     generate_trends: true    recent half-window vs the half before it
+#     leakage_review: strict   escalate warnings to blocking for this group
+#
+#   columns: a bare name, or {name, type, aggs, windows}. Per-column `aggs` and
+#            `windows` override the group's, so one expensive column can get a
+#            single aggregation while the rest get four.
+#
+# ── Feature names ───────────────────────────────────────────────────────────
+#   static           <group>__<column>
+#   time_varying     <group>__<column>__<agg>_<window>d
+#   with a filter    <group>__<filter>__<column>__<agg>_<window>d
+#   per subset       <group>__[<filter>__]event_count_<window>d
+#                    <group>__[<filter>__]recency_days_<window>d
+#   trends           <group>__<column>__trend_ratio_<window>d  (and trend_delta)
+#   derived          <group>__<name>
+#
+# Run the pipeline once and read output/feature_dictionary.csv for the exact list.
+#
+# Derived features the kit computes if you list them and they are not in your data:
+# tenure_days, recency_days. A stored tenure column is always recomputed as-of T.
+
+profile:                 # who the customer is (static)
+  temporal: static
+  columns:
+    - {name: birthyear,           type: numeric}
+    - {name: gender,              type: categorical}
+    - {name: region,              type: categorical}
+    - {name: acquisition_channel, type: categorical}
+
+contract:                # subscription / plan attributes, as-of T
+  temporal: static
+  columns:
+    - {name: plan_tier,      type: categorical}
+    - {name: mrr,            type: numeric}
+    - {name: contract_type,  type: categorical}   # monthly | annual
+    - {name: auto_renew,     type: boolean}
+    - {name: payment_method, type: categorical}
+
+usage:                   # engagement / RFM core
+  temporal: time_varying
+  source: usage
+  windows: [30, 90]                  # short-run level and a longer baseline
+  aggs: [sum, mean, max]
+  generate_trends: true
+  columns:
+    - {name: last_active_date, type: datetime}                 # -> recency
+    - {name: sessions,         type: numeric}                  # -> frequency
+    - {name: usage_volume,     type: numeric, aggs: [sum]}     # sum is enough
+    - {name: spend,            type: numeric, windows: [90]}   # monetary, long window
+
+billing:                 # payment health (HIGH leakage risk)
+  temporal: time_varying
+  source: billing
+  windows: [90, 180]
+  aggs: [sum, max]
+  leakage_review: strict
+  # `filters` is how a raw event log becomes the counted variables people expect:
+  # "failed payments in the last 90 days" is a filter plus a window plus a count,
+  # and it belongs here rather than in a hand-written SQL view nobody can find.
+  # Each filter is a pandas query over the event table and produces its own
+  # feature family, e.g. billing__failed__event_count_90d.
+  filters:
+    - name: failed
+      where: "status == 'failed'"
+      description: failed payment attempts
+    - name: paid
+      where: "status == 'paid'"
+      description: successful collections
+  columns:
+    - {name: amount,        type: numeric, aggs: [sum]}
+    - {name: days_past_due, type: numeric, aggs: [max, mean]}
+
+support:                 # service interactions
+  temporal: time_varying
+  source: support
+  windows: [90]
+  aggs: [sum, mean]
+  generate_trends: true
+  filters:
+    - name: phone
+      where: "channel == 'phone'"
+      description: phone contacts, which cost more and signal more
+  columns:
+    - {name: ticket_count, type: numeric}
+    - {name: complaints,   type: numeric}
+    - {name: nps,          type: numeric, aggs: [last, mean]}
+
+lifecycle:               # relationship history
+  temporal: time_varying
+  source: entity
+  columns:
+    - {name: tenure_days,       type: numeric}    # recomputed as-of T
+    - {name: plan_change_count, type: numeric}
+    - {name: prior_winback,     type: boolean}
+
+# ── Derived features ────────────────────────────────────────────────────────
+# Expressions over features built above, evaluated after aggregation. Use them for
+# the ratios and normalisations that make raw counts comparable across customers —
+# ten support tickets means something different for a five-year account than a
+# two-month one.
+#
+# Allowed: feature names, numbers, arithmetic, comparisons, and
+# log / log1p / exp / sqrt / abs / clip / where / minimum / maximum / sign /
+# isnull / notnull / fillna. Anything else is rejected before evaluation.
+#
+# Division by zero becomes null rather than infinity. A derived feature inherits
+# the leakage status of its inputs: if one is quarantined, this one goes too.
+ratios:
+  temporal: derived
+  features:
+    - name: spend_per_session_90d
+      expression: usage__spend__sum_90d / usage__sessions__sum_90d
+      description: average value of a session over the last 90 days
+
+    - name: failed_payment_share_90d
+      expression: >
+        billing__failed__event_count_90d /
+        (billing__failed__event_count_90d + billing__paid__event_count_90d)
+      description: share of collection attempts that failed
+
+    - name: tickets_per_year_of_tenure
+      expression: >
+        support__ticket_count__sum_90d * 4 /
+        maximum(lifecycle__tenure_days / 365, 0.25)
+      description: annualised ticket rate, normalised by how long they have been here
+
+    - name: usage_vs_baseline
+      expression: >
+        (usage__sessions__sum_30d * 3) /
+        maximum(usage__sessions__sum_90d, 1)
+      description: >
+        last 30 days against the 90-day baseline; below 1 means they are cooling off
+
+    - name: log_mrr
+      expression: log1p(contract__mrr)
+      description: revenue on a log scale, so large accounts stop dominating splits

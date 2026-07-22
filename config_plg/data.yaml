@@ -1,0 +1,42 @@
+# Postcode Lottery Group case study — data sources.
+#
+# Run `python tools/ingest_plg.py` first. The raw export is a wide, dirty
+# cross-section; the ingest step splits it into the two shapes this kit needs:
+#
+#   subscriptions.csv  one row per subscription, cleaned, PRE-PREDICTION columns only
+#   *_events.csv       the dated columns, in long form
+#
+# The split matters. survey_date, last_contact_date, win_dates and
+# service_tier_upgrade_date all carry values recorded AFTER the 2022-07-01
+# prediction date — the schema's own examples include a survey dated 2023-01-14.
+# As columns on a wide table they are silent leakage. As dated events they pass
+# through the window machinery, which drops anything at or after T - embargo.
+
+entity:
+  path: data/plg/subscriptions.csv
+  format: auto
+  # The experiment randomises at SUBSCRIPTION level, so that is the unit of
+  # analysis. customer_id is kept as a column for clustering diagnostics — see the
+  # note in pipeline.yaml about customers holding several subscriptions.
+  id_column: subscription_id
+  start_date_column: subscription_date
+
+events:
+  survey:
+    path: data/plg/survey_events.csv
+    id_column: subscription_id
+    date_column: event_date
+  contacts:
+    path: data/plg/contact_events.csv
+    id_column: subscription_id
+    date_column: event_date
+  prize_wins:
+    path: data/plg/win_events.csv
+    id_column: subscription_id
+    date_column: event_date
+
+segments:
+  - campaign_cohort
+  - country_code
+  - legacy_system_id
+  - baseline_churn_risk_band

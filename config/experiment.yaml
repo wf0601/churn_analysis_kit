@@ -1,0 +1,38 @@
+## this is optional, if there is experiment, you need to specify the column that indicates the variant each subscription is assigned to. also the start/end date of the experiment
+#
+# When `enabled: false` (or this file is left blank) the experiment stage is skipped.
+# A randomised experiment beats every observational estimate in causal.yaml, so if
+# you have one, the report leads with it.
+
+enabled: false
+
+variant_column: variant         # column on the entity table, e.g. control/treatment
+control_value: control          # which variant is the baseline
+
+# Pick ONE of these two shapes.
+#
+# assignment_date — a snapshot cohort: everyone already active on one date was
+#   assigned then, whenever they signed up. This is the common case for a
+#   retention campaign aimed at the existing base.
+# assignment_date: 2024-01-01
+#
+# start_date / end_date — rolling enrolment: customers join the experiment as they
+#   sign up, so eligibility filters on SIGNUP date. Using these for a snapshot
+#   cohort excludes everyone who signed up before the experiment began.
+start_date:
+end_date:
+
+# Analysis window: churn is measured over this many days after assignment.
+# Blank -> falls back to panel.horizon_days from pipeline.yaml.
+horizon_days:
+
+# Optional variance reduction. Pre-experiment covariates measured BEFORE start_date
+# are used as CUPED-style controls. They must be pre-treatment — anything measured
+# after assignment is a post-treatment control and will bias the estimate.
+covariates: []
+
+# Sanity checks that run before any effect is reported.
+checks:
+  sample_ratio_mismatch: true   # chi-square on assignment counts; flags broken randomisation
+  pre_period_balance: true      # covariate balance across variants at assignment time
+alpha: 0.05

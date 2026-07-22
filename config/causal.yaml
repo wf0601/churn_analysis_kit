@@ -1,0 +1,59 @@
+# config/causal.yaml — which drivers you want a CAUSAL answer for.
+#
+# Driver detection (the model) tells you what *predicts* churn. That is not the
+# same question as "what happens to churn if we change this". This file lists the
+# handful of levers where the difference matters, and the kit estimates an effect
+# with cross-fitted doubly-robust (AIPW) estimation plus refutation tests.
+#
+# Leave `treatments` empty to skip causal analysis entirely.
+
+treatments:
+  # `feature` must be an exact feature name produced by the pipeline. After a run,
+  # output/feature_dictionary.csv lists every available name — copy from there.
+  - name: had_support_complaint
+    feature: support__complaints__sum_90d
+    type: threshold             # threshold | binary | continuous_median_split
+    threshold: 0                # treated when value > threshold
+    direction: greater
+
+  - name: payment_failure
+    feature: billing__failed__event_count_90d
+    type: threshold
+    threshold: 0
+    direction: greater
+
+confounders:
+  mode: auto                    # auto | explicit
+  # auto = every other feature measured in the same pre-T window.
+  #
+  # READ THIS. Auto-selection cannot tell a confounder from a mediator. If a
+  # variable sits on the causal path (complaints -> usage drops -> churn), then
+  # controlling for it removes part of the very effect you are measuring. List
+  # such variables here to keep them OUT of the adjustment set.
+  #
+  # Entries accept globs, because one source column becomes several features and
+  # excluding a variable means excluding all of its aggregations.
+  #
+  # You do NOT need to list: other features from the treatment's own group (all
+  # windows, aggs and filtered subsets are dropped automatically — a base count
+  # equals the sum of its subsets, which would make the treatment perfectly
+  # predictable), or derived features computed from anything already excluded.
+  # Both are handled for you and reported in the output.
+  exclude:
+    # Mediators: complaints depress usage, and usage drives churn. Controlling for
+    # them would subtract part of the effect being measured.
+    - usage__usage_volume__sum_30d
+    - usage__sessions__sum_30d
+  explicit: []                  # used when mode = explicit
+
+estimator:
+  method: aipw                  # aipw (doubly robust) — outcome + propensity models
+  cross_fit_folds: 5
+  propensity_clip: 0.02         # trim extreme propensities; also drives the overlap check
+  min_overlap_share: 0.90       # abort the estimate if fewer than this share of rows overlap
+  bootstrap: 0                  # 0 = analytic influence-function CI (fast); >0 = bootstrap reps
+
+refutations:
+  placebo_treatment: true       # shuffle treatment; a real effect must collapse to ~0
+  random_subset: true           # re-estimate on 70% of data; effect should be stable
+  subset_fraction: 0.7

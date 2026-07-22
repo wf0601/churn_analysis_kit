@@ -1,0 +1,12 @@
+pandas>=2.0
+numpy>=1.24
+scikit-learn>=1.4
+scipy>=1.10
+PyYAML>=6.0
+matplotlib>=3.7
+
+# Optional. Without lifelines the kit still produces Kaplan-Meier curves from its own
+# implementation but skips Cox and log-rank; without shap it ranks drivers by
+# permutation importance instead.
+lifelines>=0.27
+shap>=0.44

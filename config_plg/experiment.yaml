@@ -1,0 +1,63 @@
+# The randomised experiment. This is the part of the case study that outranks
+# everything observational, and the kit puts it above the causal section in the
+# report for that reason.
+#
+# Three arms: Control, Variant_A (discount), Variant_B (value-add). The kit
+# compares every non-control arm against Control and reports a point estimate with
+# a 95% CI for each.
+
+enabled: true
+
+variant_column: campaign_cohort
+control_value: Control
+
+# Everyone active on 2022-07-01 was assigned on that date, whenever they signed up.
+# That is what `assignment_date` means, and it is the right key here.
+#
+# Do NOT use start_date/end_date for this experiment: those describe ROLLING
+# ENROLMENT, where customers join the experiment as they sign up, and they filter
+# on signup date. Since every subscription in this export predates 2022-07-01, that
+# filter would exclude the entire cohort.
+assignment_date: 2022-07-01
+
+# Same horizon as the predictive target, so the two answer the same question. If
+# you shorten panel.horizon_days for the model, decide deliberately whether to
+# shorten this too — and say so in design_doc.md either way.
+horizon_days: 273
+
+# Pre-treatment covariates for variance reduction and for the balance check.
+# All are measured before assignment; a post-assignment control here would bias
+# the estimate rather than sharpen it.
+covariates:
+  - baseline_churn_risk_band
+  - monthly_spend_eur
+  - failed_payments_12m
+  - country_code
+  - legacy_system_id
+
+checks:
+  # Assignment was randomised but "not everyone in a treatment cohort actually
+  # received the communication". SRM tests the ASSIGNMENT counts, which should
+  # still be clean — broken delivery does not change who was assigned. If SRM
+  # fails, the randomisation itself is suspect, which is a different and worse
+  # problem than non-compliance.
+  sample_ratio_mismatch: true
+  pre_period_balance: true
+
+alpha: 0.05
+
+# ---------------------------------------------------------------------------
+# WHAT THIS GIVES YOU, AND WHAT IT DOES NOT
+#
+# Gives you: the intention-to-treat effect — the assignment-based comparison the
+# assignment asks for "at minimum". ITT is the right headline: it is what a
+# marketeer can actually decide to do, imperfect delivery included.
+#
+# Does NOT give you: the complier average causal effect (treatment-on-the-treated).
+# That needs treatment_sent_flag as a compliance indicator and an instrumental-
+# variable estimate — ITT divided by the compliance rate under exclusion and
+# monotonicity. This kit does not implement it. Do not approximate it by filtering
+# to treatment_sent_flag == 1 and comparing to Control: whatever operational reason
+# stopped the send is almost certainly correlated with the participant, and that
+# comparison is confounded in a way no amount of adjustment fixes.
+# ---------------------------------------------------------------------------

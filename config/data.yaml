@@ -1,0 +1,44 @@
+# config/data.yaml — WHERE your data lives and what the key columns are.
+# This is the only file that must point at real paths.
+#
+# Two supported shapes:
+#   A) entity table only        -> everything is read "as of export"; the kit will
+#                                  loudly warn that point-in-time correctness cannot
+#                                  be verified for time_varying feature groups.
+#   B) entity table + event log -> the correct shape. Time-varying features are
+#                                  recomputed inside each snapshot's window, so no
+#                                  future information can reach a feature.
+
+entity:
+  path: data/customers.csv
+  format: auto                  # auto | csv | parquet
+  id_column: customer_id
+  start_date_column: signup_date   # cohort entry / subscription start
+
+  # OPTIONAL slowly-changing-dimension support. If your entity table is versioned
+  # (one row per customer per validity interval), set these two and static features
+  # become point-in-time correct instead of "as of export".
+  # valid_from_column: valid_from
+  # valid_to_column: valid_to
+
+# OPTIONAL event logs, one block per time_varying feature group in feature.yaml.
+# The group name in feature.yaml must match the key used here.
+events:
+  usage:
+    path: data/usage_events.csv
+    id_column: customer_id
+    date_column: event_date
+  billing:
+    path: data/billing_events.csv
+    id_column: customer_id
+    date_column: event_date
+  support:
+    path: data/support_events.csv
+    id_column: customer_id
+    date_column: event_date
+
+# Columns used to stratify survival curves and to break down drivers in the report.
+# Must exist on the entity table.
+segments:
+  - plan_tier
+  - region

@@ -1,0 +1,16 @@
+target:
+  mode: event_date                # event_date | label
+  event_date_column: contract_end_date
+  # label_column: churned         # used when mode = label
+  # churn_value: 1
+
+  # Required for survival/CLV: customers active as of this date are
+  # right-censored, NOT counted as retained.
+  observation_end_date: 2025-06-30
+
+  # OPTIONAL. Set this when the recorded churn date is a billing artifact rather
+  # than the moment the customer decided to leave (e.g. an annual contract that
+  # lapses months after the customer stopped showing up). The kit shifts the
+  # effective churn time earlier by this many days before building labels, so the
+  # features are not describing a customer who had already mentally left.
+  decision_lead_days: 0

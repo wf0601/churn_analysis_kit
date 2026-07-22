@@ -1,0 +1,25 @@
+target:
+  # The export carries BOTH `churned` (a flag) and `churn_date`. Use the date.
+  #
+  # The flag alone cannot say *when*, so it cannot distinguish a subscription that
+  # lapsed in August 2022 from one that lapsed in March 2023 — and it cannot tell
+  # either of them from a subscription whose outcome window simply had not closed.
+  # With the date, censoring is explicit and the survival stage works.
+  #
+  # `python tools/ingest_plg.py` reconciles the two and reports any row where
+  # churned = 1 but churn_date is missing. Those rows are the ones to ask the data
+  # owner about before trusting any number here.
+  mode: event_date
+  event_date_column: churn_date
+
+  # From the schema: the follow-up window closes 2023-03-31. Every subscription
+  # still active then is RIGHT-CENSORED, not retained. The kit enforces that; a
+  # plain `churned == 0` framing would quietly call them survivors.
+  observation_end_date: 2023-03-31
+
+  # Leave at 0 for this dataset. churn_date here is the subscription lapse date,
+  # which for a monthly lottery is close to the decision. Raise it if you find that
+  # cancellations are recorded at the end of a paid-up period rather than when the
+  # participant decided to stop — the embargo in pipeline.yaml already covers the
+  # short-run version of this.
+  decision_lead_days: 0

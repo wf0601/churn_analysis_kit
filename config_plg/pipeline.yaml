@@ -1,0 +1,119 @@
+# PLG case study — run settings.
+
+run:
+  output_dir: output_plg
+  random_seed: 42
+
+panel:
+  # ONE index date: the experiment start. This is the assignment's framing —
+  # "each row is a snapshot of one active subscription as of 1 July 2022" — so a
+  # rolling panel would be inventing prediction dates the data cannot support.
+  snapshot_mode: single
+  snapshot_dates:
+    - 2022-07-01
+
+  # 2022-07-01 -> 2023-03-31 is 273 days, the full observed follow-up window.
+  # Using the whole window means the predictive target and the experiment outcome
+  # are the same quantity, which is what Part C asks you to state explicitly.
+  #
+  # A 180-day horizon is the defensible alternative: it lands inside the window
+  # with margin and matches a two-quarter retention cycle. Changing this one number
+  # re-runs everything consistently, which is the point of putting it here.
+  horizon_days: 273
+
+  # Small but non-zero. The static columns are as-of T by construction so the
+  # embargo does not touch them; it applies to the event logs, where it stops a
+  # cancellation enquiry logged in the last few days of June from being read as a
+  # cause of a July churn decision it was actually part of.
+  embargo_days: 7
+
+  min_tenure_days: 0
+
+split:
+  # A single index date means there is no later period to hold out, so out-of-time
+  # is unavailable — the kit would fall back with a warning anyway; say it here
+  # instead. The honest consequence: this holdout measures generalisation to new
+  # subscriptions, NOT to a later time period or a different churn regime. That
+  # limitation belongs in design_doc.md.
+  strategy: grouped_random
+  test_fraction: 0.25
+  cv_folds: 5
+
+model:
+  primary: hist_gradient_boosting
+  calibrate: true              # Part B asks for calibration plots
+  class_weight: balanced
+  max_iter: 400
+  learning_rate: 0.05
+
+drivers:
+  top_k: 20
+  method: auto
+  n_permutation_repeats: 10
+  min_stability: 0.6
+
+leakage:
+  on_block: quarantine
+
+  denylist_patterns:
+    # kit defaults
+    - churn
+    - cancel
+    - terminat
+    - "(^|_)end_date$"
+    - expir
+    - "(^|_)exit"
+    - reason
+    - refund
+    - "final_"
+    - closed
+    - win_?back
+    - retention_offer
+    - save_?desk
+    - survival
+    - is_active
+    - status
+    # added for this export — every one of these is post-prediction or
+    # post-treatment, and the schema makes them tempting because they are numeric
+    # and highly predictive
+    - revenue_next
+    - _observed
+    - offer_cost
+    - treatment_sent
+    - campaign_cohort
+    - upgrade_date
+    - service_tier
+
+  # Two deliberate exceptions. Both are pre-prediction; both trip a pattern.
+  allowlist_columns:
+    # The incumbent rule-based band, computed AT experiment start. It matches
+    # "churn" by name only. Keeping it is the point — the new model has to beat it,
+    # and the driver ranking shows how much signal it already carries.
+    - baseline_churn_risk_band
+    # The `cancellation` filter on the contacts event log, built from
+    # last_contact_reason. A cancellation ENQUIRY before the prediction date is one
+    # of the strongest legitimate churn signals a lottery has — it is a customer
+    # asking about leaving, not a record of them having left.
+    #
+    # It is only safe because it arrives through an event log with a date, so
+    # anything at or after T - embargo is already excluded by the window. If you
+    # ever flatten it back onto the wide table, delete this line: at that point the
+    # kit can no longer tell a pre-T enquiry from a post-T cancellation record.
+    - cancellation
+
+  single_feature_auc_block: 0.90
+  single_feature_auc_warn: 0.80
+  missingness_auc_warn: 0.75
+  model_auc_block: 0.995
+  id_cardinality_ratio_warn: 0.9
+
+survival:
+  enabled: true
+  cox: true
+  by:
+    - campaign_cohort
+    - baseline_churn_risk_band
+  max_strata: 6
+
+causal:
+  enabled: true

@@ -1,0 +1,156 @@
+# Feature groups for the PLG case study.
+#
+# Every column here is knowable on 2022-07-01. The schema's "last 12 months" and
+# "last 90 days" columns are already as-of the experiment start, which is why they
+# are declared `static` rather than `time_varying` — declaring them time_varying
+# would make the kit warn that it cannot verify a point-in-time read, and that
+# warning would be noise, because the export is a snapshot by construction.
+#
+# DELIBERATELY ABSENT — these are the assignment's leakage traps:
+#   churned, churn_date            the outcome
+#   observation_end_date           defines the outcome window
+#   campaign_cohort                the treatment (goes in experiment.yaml)
+#   treatment_sent_flag            post-assignment compliance
+#   offer_cost_eur                 only non-zero once a treatment was sent
+#   revenue_next_12m_observed      measured AFTER the experiment started
+#   service_tier_upgrade_date      post-prediction event
+#   satisfaction_score / survey_date, last_contact_date / _reason, win_dates
+#                                  → moved to event logs, so the window drops the
+#                                    post-2022-07-01 ones automatically
+# pipeline.yaml also blocks them by pattern, so adding one back is caught.
+
+identity:                 # kept to detect systematic differences between sources
+  temporal: static
+  columns:
+    - {name: legacy_system_id, type: categorical}   # SYS_OLD | SYS_NEW
+
+profile:
+  temporal: static
+  columns:
+    - {name: participant_age,   type: numeric}
+    - {name: country_code,      type: categorical}
+    - {name: postcode_prefix,   type: categorical}  # coarsened by the ingest step
+    - {name: marketing_channel, type: categorical}
+
+subscription:
+  temporal: static
+  columns:
+    - {name: tenure_days,              type: numeric}     # recomputed as-of T
+    - {name: extra_draws_per_year,     type: numeric}     # 0 | 1 | 2
+    - {name: add_ons,                  type: numeric}
+    - {name: payment_method,           type: categorical}
+    - {name: monthly_spend_eur,        type: numeric}     # currency-normalised
+    - {name: donation_share_charity,   type: numeric}     # normalised to 0-1
+    - {name: historic_revenue_12m_eur, type: numeric}     # PRE-experiment revenue
+
+payments:                 # payment health — the classic churn-adjacent group
+  temporal: static
+  leakage_review: strict
+  columns:
+    - {name: failed_payments_12m, type: numeric}
+
+engagement:
+  temporal: static
+  columns:
+    - {name: email_opens,       type: numeric}   # parsed out of engagement_history
+    - {name: web_sessions_90d,  type: numeric}   # "10+" -> 10, "missing" -> null
+    - {name: web_sessions_capped, type: boolean} # was the raw value censored at 10+
+
+service:
+  temporal: static
+  leakage_review: strict
+  columns:
+    - {name: c_service_contacts_12m, type: numeric}
+    - {name: complaints_12m,         type: numeric}
+
+wins:
+  temporal: static
+  columns:
+    - {name: lifetime_wins, type: numeric}
+
+legacy_score:             # the incumbent rule-based band — the model must beat it
+  temporal: static
+  columns:
+    - {name: baseline_churn_risk_band, type: categorical}
+
+# ---------------------------------------------------------------------------
+# Event-log groups. These exist so that dated fields are windowed rather than
+# read flat, which is what keeps post-prediction records out of the features.
+# ---------------------------------------------------------------------------
+survey:
+  temporal: time_varying
+  source: survey
+  windows: [365]
+  aggs: [last, mean]        # most recent score, and the average of the window
+  columns:
+    - {name: satisfaction_score, type: numeric}
+
+contacts:                 # HIGH leakage risk: see the note on cancellation enquiries
+  temporal: time_varying
+  source: contacts
+  # Two windows, so "recently annoyed" and "chronically annoyed" are separable.
+  windows: [90, 365]
+  aggs: [sum]
+  leakage_review: strict
+  # This is the shape a real contact log takes: one row per contact with a reason,
+  # and the counted variables built here rather than upstream. `is_*` columns are
+  # kept for the single-row export, but the filters are what you would use once the
+  # full contact history is available.
+  filters:
+    - name: cancellation
+      where: "is_cancellation_inquiry == 1"
+      description: enquiries about cancelling — the strongest legitimate pre-T signal
+    - name: billing
+      where: "is_billing_issue == 1"
+      description: billing problems, an operationally fixable cause
+  # The `is_*` flags are NOT listed as columns: the filters above already count the
+  # same events, and having both would give the causal stage two names for one
+  # variable — which destroys overlap rather than improving adjustment.
+  columns:
+    - {name: contact, type: numeric}   # always 1; gives counts + recency per subset
+
+prize_wins:
+  temporal: time_varying
+  source: prize_wins
+  windows: [365, 1095]      # last year, and the three-year history
+  aggs: [sum]
+  columns:
+    - {name: win, type: numeric}
+
+# ── Derived features ────────────────────────────────────────────────────────
+# Rates and shares, so the counts above are comparable between a six-month
+# participant and a six-year one. Edit here, not in Python.
+rates:
+  temporal: derived
+  features:
+    - name: contacts_per_year
+      expression: >
+        contacts__event_count_365d /
+        maximum(subscription__tenure_days / 365, 0.5)
+      description: annualised contact rate, normalised by tenure
+
+    - name: failed_payment_rate
+      expression: >
+        payments__failed_payments_12m /
+        maximum(subscription__tenure_days / 365, 1)
+      description: failed payments per year of tenure
+
+    - name: charity_euros_per_month
+      expression: >
+        subscription__monthly_spend_eur * subscription__donation_share_charity
+      description: >
+        the amount actually reaching charities each month — the number the
+        business cares about, and a better value proxy than raw spend
+
+    - name: spend_vs_historic
+      expression: >
+        subscription__monthly_spend_eur * 12 /
+        maximum(subscription__historic_revenue_12m_eur, 1)
+      description: current run-rate against what they actually paid last year
+
+    - name: wins_per_year
+      expression: >
+        wins__lifetime_wins / maximum(subscription__tenure_days / 365, 0.5)
+      description: >
+        win rate — tests whether never winning drives churn, which is the
+        question a lottery most wants answered

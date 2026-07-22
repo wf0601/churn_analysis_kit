@@ -1,0 +1,35 @@
+data_export_date: 2023-03-31
+
+# When churn started being RECORDED. Every row in this export is a subscription
+# that was still active on 2022-07-01, so no earlier churn appears anywhere in the
+# data — that is the honest boundary, and it is why the report will say 100% of
+# rows are left-truncated.
+observation_starting_date: 2022-07-01
+
+# When event HISTORY becomes complete. A separate question, and for this export a
+# much earlier date: win_dates, contacts and surveys reach back years before the
+# experiment. Without this, the longest feature window (1095d on prize_wins) would
+# be measured against the churn-observation boundary and every prediction date
+# would be rejected.
+#
+# Set it to the earliest date your event logs are trustworthy from — not the
+# earliest row present, which may just be a straggler.
+#
+# 2022-07-01 minus the longest window (1095d) minus the embargo (7d) lands on
+# 2019-06-25, so this must sit on or before that. If the kit warns that your logs
+# do not actually reach this far back, believe it and either move this date later
+# or shorten the window.
+event_history_starts: 2019-06-01
+
+# MUST be keep_flagged for this dataset, and the reason is worth understanding.
+#
+# Every row is an active subscription as of 2022-07-01. Participants who joined in
+# 2018 and churned in 2020 are simply not in the export — they never survived to be
+# snapshotted. So the whole cohort is pre-selected for loyalty, and tenure will look
+# protective partly because of who is present rather than because of what tenure
+# does.
+#
+# `drop` cannot help here: it would delete the entire cohort. `keep_flagged` keeps
+# them, raises SURVIVORSHIP_BIAS in the report, and uses a left-truncated survival
+# fit. That warning is a correct description of this data, not a problem to silence.
+left_truncation: keep_flagged
